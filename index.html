@@ -23,7 +23,7 @@
         if (typeof loadedCv.Mat === 'function') {
           settled = true;
           window.cv = loadedCv;
-          resolveReady(loadedCv);
+          window.__openCvInstance = loadedCv; resolveReady();
           return;
         }
         // OpenCV 4.10 supplies a thenable Module, not a native Promise.
