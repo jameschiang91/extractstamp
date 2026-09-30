@@ -21,7 +21,7 @@ function initOpenCV(callback) {
         reject(new Error('OpenCV 加载器未启动。请刷新页面后重试。'));
         return;
       }
-      window.__openCvReady.then((loadedCv) => {
+      window.__openCvReady.then(() => { const loadedCv = window.__openCvInstance || window.cv;
         window.clearTimeout(timeout);
         if (!loadedCv || typeof loadedCv.Mat !== 'function') {
           reject(new Error('OpenCV 未能正确初始化。请刷新页面后重试。'));
