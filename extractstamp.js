@@ -1,198 +1,174 @@
 /*
- * Pure frontend stamp extraction for GitHub Pages.
- * It never uploads selected images and has no external runtime dependency.
+ * OpenCV-backed, browser-only stamp extraction.
+ * The image remains in the browser: no file is uploaded or stored remotely.
  */
 
 let engineReadyPromise;
 
-const COLOR_RANGES = {
-  auto: [{ min: 160, max: 348 }],
-  red: [{ min: 0, max: 24 }, { min: 336, max: 360 }],
-  blue: [{ min: 180, max: 280 }],
-  green: [{ min: 70, max: 180 }],
-  purple: [{ min: 210, max: 348 }],
-};
-
-// Strict mode starts from confident ink pixels, then restores only the nearby
-// antialiased pixels. This rejects most neutral/grey document printing.
 const CLEANUP_PROFILES = {
-  strict: { coreSaturation: 0.14, edgeSaturation: 0.07 },
-  balanced: { coreSaturation: 0.10, edgeSaturation: 0.045 },
+  strict: { red: [115, 150], cool: [68, 62] },
+  balanced: { red: [58, 58], cool: [36, 36] },
 };
 
 function initOpenCV(callback) {
-  // Retained for compatibility with the original public API. No OpenCV load is
-  // needed, so initialization cannot leave the upload handler waiting forever.
-  if (!engineReadyPromise) engineReadyPromise = Promise.resolve(true);
+  if (!engineReadyPromise) {
+    engineReadyPromise = new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        reject(new Error('OpenCV 加载超时。请检查网络后刷新页面重试。'));
+      }, 20000);
+      if (!window.__openCvReady) {
+        window.clearTimeout(timeout);
+        reject(new Error('OpenCV 加载器未启动。请刷新页面后重试。'));
+        return;
+      }
+      window.__openCvReady.then((loadedCv) => {
+        window.clearTimeout(timeout);
+        if (!loadedCv || typeof loadedCv.Mat !== 'function') {
+          reject(new Error('OpenCV 未能正确初始化。请刷新页面后重试。'));
+          return;
+        }
+        window.cv = loadedCv;
+        resolve(loadedCv);
+      }, (error) => {
+        window.clearTimeout(timeout);
+        reject(error instanceof Error ? error : new Error('OpenCV 加载失败。'));
+      });
+    });
+  }
   if (callback) engineReadyPromise.then(() => callback(true), () => callback(false));
   return engineReadyPromise;
 }
 
-function hexToRgb(hex) {
-  const value = String(hex || '#0000ff').replace('#', '');
-  const normalized = value.length === 3 ? value.split('').map((part) => part + part).join('') : value;
-  return [
-    parseInt(normalized.slice(0, 2), 16) || 0,
-    parseInt(normalized.slice(2, 4), 16) || 0,
-    parseInt(normalized.slice(4, 6), 16) || 0,
-  ];
-}
-
-function rgbToHsv(red, green, blue) {
-  const r = red / 255;
-  const g = green / 255;
-  const b = blue / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const delta = max - min;
-  let hue = 0;
-  if (delta) {
-    if (max === r) hue = 60 * (((g - b) / delta) % 6);
-    else if (max === g) hue = 60 * ((b - r) / delta + 2);
-    else hue = 60 * ((r - g) / delta + 4);
-  }
-  if (hue < 0) hue += 360;
-  return { hue, saturation: max ? delta / max : 0, value: max };
-}
-
-function matchesColor(red, green, blue, color, minimumSaturation) {
-  const hsv = rgbToHsv(red, green, blue);
-  if (hsv.value < 0.09 || hsv.saturation < minimumSaturation) return false;
-  const ranges = COLOR_RANGES[color] || COLOR_RANGES.auto;
-  return ranges.some(({ min, max }) => hsv.hue >= min && hsv.hue <= max);
-}
-
-function dilateMask(mask, width, height) {
-  const expanded = new Uint8Array(mask.length);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const index = y * width + x;
-      if (!mask[index]) continue;
-      for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
-        const nextY = y + offsetY;
-        if (nextY < 0 || nextY >= height) continue;
-        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-          const nextX = x + offsetX;
-          if (nextX >= 0 && nextX < width) expanded[nextY * width + nextX] = 255;
-        }
-      }
-    }
-  }
-  return expanded;
-}
-
-function buildCleanMask(source, width, height, color, cleanup) {
+function hsvRanges(color, cleanup) {
   const profile = CLEANUP_PROFILES[cleanup] || CLEANUP_PROFILES.strict;
-  const core = new Uint8Array(width * height);
-  const edge = new Uint8Array(width * height);
-  for (let pixel = 0; pixel < core.length; pixel += 1) {
-    const sourceIndex = pixel * 4;
-    const red = source[sourceIndex];
-    const green = source[sourceIndex + 1];
-    const blue = source[sourceIndex + 2];
-    if (matchesColor(red, green, blue, color, profile.edgeSaturation)) edge[pixel] = 255;
-    if (matchesColor(red, green, blue, color, profile.coreSaturation)) core[pixel] = 255;
-  }
-  const expandedCore = dilateMask(core, width, height);
-  const mask = new Uint8Array(core.length);
-  for (let pixel = 0; pixel < mask.length; pixel += 1) {
-    if (edge[pixel] && expandedCore[pixel]) mask[pixel] = 255;
-  }
-  return mask;
+  const [saturation, value] = color === 'red' ? profile.red : profile.cool;
+  const ranges = {
+    red: [[0, 12], [168, 180]],
+    blue: [[92, 140]],
+    green: [[38, 90]],
+    purple: [[110, 174]],
+    auto: [[92, 174]],
+  };
+  return (ranges[color] || ranges.auto).map(([lowHue, highHue]) => ({
+    low: [lowHue, saturation, value, 0],
+    high: [highHue, 255, 255, 255],
+  }));
 }
 
-function getMaskBounds(mask, width, height, padding) {
-  let left = width;
-  let top = height;
+function buildMask(cv, rgba, color, cleanup) {
+  const rgb = new cv.Mat();
+  const hsv = new cv.Mat();
+  const mask = cv.Mat.zeros(rgba.rows, rgba.cols, cv.CV_8UC1);
+  const temporary = new cv.Mat();
+  const kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+  try {
+    cv.cvtColor(rgba, rgb, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
+    hsvRanges(color, cleanup).forEach(({ low, high }) => {
+      const lower = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), low);
+      const upper = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), high);
+      cv.inRange(hsv, lower, upper, temporary);
+      cv.bitwise_or(mask, temporary, mask);
+      lower.delete();
+      upper.delete();
+    });
+    cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kernel);
+    cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel);
+    return mask;
+  } finally {
+    rgb.delete();
+    hsv.delete();
+    temporary.delete();
+    kernel.delete();
+  }
+}
+
+function fullBounds(cv, mask) {
+  let left = mask.cols;
+  let top = mask.rows;
   let right = -1;
   let bottom = -1;
-  let matched = 0;
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (!mask[y * width + x]) continue;
-      matched += 1;
+  let matches = 0;
+  for (let y = 0; y < mask.rows; y += 1) {
+    for (let x = 0; x < mask.cols; x += 1) {
+      if (!mask.data[y * mask.cols + x]) continue;
       left = Math.min(left, x);
       top = Math.min(top, y);
       right = Math.max(right, x);
       bottom = Math.max(bottom, y);
+      matches += 1;
     }
   }
-  if (!matched) return null;
-  return {
-    left: Math.max(0, left - padding),
-    top: Math.max(0, top - padding),
-    right: Math.min(width - 1, right + padding),
-    bottom: Math.min(height - 1, bottom + padding),
-    matched,
-  };
+  return matches >= 20 ? { x: left, y: top, width: right - left + 1, height: bottom - top + 1 } : null;
 }
 
-function clipMaskToEllipse(mask, width, height, bounds) {
-  const centerX = (bounds.left + bounds.right) / 2;
-  const centerY = (bounds.top + bounds.bottom) / 2;
-  const radiusX = Math.max(1, (bounds.right - bounds.left + 1) / 2);
-  const radiusY = Math.max(1, (bounds.bottom - bounds.top + 1) / 2);
-  const tolerance = 1.06;
-  for (let y = bounds.top; y <= bounds.bottom; y += 1) {
-    for (let x = bounds.left; x <= bounds.right; x += 1) {
-      const horizontal = (x - centerX) / radiusX;
-      const vertical = (y - centerY) / radiusY;
-      if (horizontal * horizontal + vertical * vertical > tolerance) mask[y * width + x] = 0;
-    }
+function stampBounds(cv, mask) {
+  // Text crossing an outline can split it into contours. The union preserves
+  // the entire circular or oval stamp instead of retaining one half.
+  return fullBounds(cv, mask);
+}
+
+function padBounds(bounds, width, height, padding) {
+  const left = Math.max(0, bounds.x - padding);
+  const top = Math.max(0, bounds.y - padding);
+  const right = Math.min(width, bounds.x + bounds.width + padding);
+  const bottom = Math.min(height, bounds.y + bounds.height + padding);
+  return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
+function cropToEllipse(cv, mask, bounds) {
+  const ellipseMask = cv.Mat.zeros(mask.rows, mask.cols, cv.CV_8UC1);
+  try {
+    const center = new cv.Point(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    const axes = new cv.Size(Math.max(1, bounds.width / 2), Math.max(1, bounds.height / 2));
+    cv.ellipse(ellipseMask, center, axes, 0, 0, 360, new cv.Scalar(255), -1);
+    cv.bitwise_and(mask, ellipseMask, mask);
+  } finally {
+    ellipseMask.delete();
   }
 }
 
-function createResultData(source, width, mask, bounds, outputColor) {
-  const resultWidth = bounds.right - bounds.left + 1;
-  const resultHeight = bounds.bottom - bounds.top + 1;
-  const output = new Uint8ClampedArray(resultWidth * resultHeight * 4);
-  const preserveOriginal = !outputColor || outputColor === 'original';
-  const [targetRed, targetGreen, targetBlue] = preserveOriginal ? [0, 0, 0] : hexToRgb(outputColor);
-  let matched = 0;
-  for (let y = 0; y < resultHeight; y += 1) {
-    for (let x = 0; x < resultWidth; x += 1) {
-      const sourceX = bounds.left + x;
-      const sourceY = bounds.top + y;
-      const sourcePixel = sourceY * width + sourceX;
-      if (!mask[sourcePixel]) continue;
-      const sourceIndex = sourcePixel * 4;
-      const targetIndex = (y * resultWidth + x) * 4;
-      output[targetIndex] = preserveOriginal ? source[sourceIndex] : targetRed;
-      output[targetIndex + 1] = preserveOriginal ? source[sourceIndex + 1] : targetGreen;
-      output[targetIndex + 2] = preserveOriginal ? source[sourceIndex + 2] : targetBlue;
-      output[targetIndex + 3] = 255;
-      matched += 1;
+function paintResult(cv, rgba, mask, bounds, outputColor) {
+  const result = cv.Mat.zeros(bounds.height, bounds.width, cv.CV_8UC4);
+  const sourceRoi = rgba.roi(bounds);
+  const maskRoi = mask.roi(bounds);
+  try {
+    if (!outputColor || outputColor === 'original') {
+      sourceRoi.copyTo(result, maskRoi);
+    } else {
+      const value = String(outputColor).replace('#', '');
+      const rgb = value.length === 3 ? value.split('').map((part) => part + part).join('') : value;
+      const red = Number.parseInt(rgb.slice(0, 2), 16) || 0;
+      const green = Number.parseInt(rgb.slice(2, 4), 16) || 0;
+      const blue = Number.parseInt(rgb.slice(4, 6), 16) || 0;
+      result.setTo(new cv.Scalar(red, green, blue, 255), maskRoi);
     }
+    const canvas = document.createElement('canvas');
+    cv.imshow(canvas, result);
+    return canvas.toDataURL('image/png');
+  } finally {
+    sourceRoi.delete();
+    maskRoi.delete();
+    result.delete();
   }
-  return { output, resultWidth, resultHeight, matched };
 }
 
 function extractStampWithImage(image, outputColor = 'original', color = 'auto', shape = 'ellipse', cleanup = 'strict') {
-  const canvas = document.createElement('canvas');
-  canvas.width = image.naturalWidth || image.width;
-  canvas.height = image.naturalHeight || image.height;
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  if (!context) throw new Error('浏览器不支持本地图像处理。');
-  context.drawImage(image, 0, 0);
-  const sourceImage = context.getImageData(0, 0, canvas.width, canvas.height);
-  const { data: source, width, height } = sourceImage;
-  const mask = buildCleanMask(source, width, height, color, cleanup);
-  let bounds = getMaskBounds(mask, width, height, shape === 'ellipse' ? 5 : 2);
-  if (!bounds || bounds.matched < 20) return [];
-  if (shape === 'ellipse') {
-    clipMaskToEllipse(mask, width, height, bounds);
-    bounds = getMaskBounds(mask, width, height, 5);
+  const cv = window.cv;
+  if (!cv || typeof cv.imread !== 'function') throw new Error('OpenCV 尚未就绪。');
+  const rgba = cv.imread(image);
+  let mask;
+  try {
+    mask = buildMask(cv, rgba, color, cleanup);
+    const detected = stampBounds(cv, mask);
+    if (!detected) return [];
+    const bounds = padBounds(detected, rgba.cols, rgba.rows, shape === 'ellipse' ? 6 : 2);
+    if (shape === 'ellipse') cropToEllipse(cv, mask, bounds);
+    return [paintResult(cv, rgba, mask, bounds, outputColor)];
+  } finally {
+    if (mask) mask.delete();
+    rgba.delete();
   }
-  if (!bounds || bounds.matched < 20) return [];
-  const result = createResultData(source, width, mask, bounds, outputColor);
-  if (!result.matched) return [];
-  const outputCanvas = document.createElement('canvas');
-  outputCanvas.width = result.resultWidth;
-  outputCanvas.height = result.resultHeight;
-  const outputContext = outputCanvas.getContext('2d');
-  if (!outputContext) throw new Error('浏览器不支持本地图像处理。');
-  outputContext.putImageData(new ImageData(result.output, result.resultWidth, result.resultHeight), 0, 0);
-  return [outputCanvas.toDataURL('image/png')];
 }
 
 function loadImage(file) {
