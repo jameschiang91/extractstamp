@@ -5,7 +5,49 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="./logo32.png">
   <title>印章提取器</title>
-  <script src="./extractstamp.js" onerror="window.__extractStampScriptError = true"></script>
+  <script>
+    (() => {
+      let settled = false;
+      let resolveReady;
+      let rejectReady;
+      window.__openCvReady = new Promise((resolve, reject) => {
+        resolveReady = resolve;
+        rejectReady = reject;
+      });
+      const finish = (candidate) => {
+        if (settled) return;
+        Promise.resolve(candidate || window.cv).then((loadedCv) => {
+          if (settled || !loadedCv || typeof loadedCv.Mat !== 'function') return;
+          settled = true;
+          window.cv = loadedCv;
+          resolveReady(loadedCv);
+        }, (error) => {
+          if (settled) return;
+          settled = true;
+          rejectReady(error instanceof Error ? error : new Error('OpenCV 加载失败。'));
+        });
+      };
+      const moduleOptions = {
+        onRuntimeInitialized() { finish(window.cv); },
+        onAbort(message) {
+          if (settled) return;
+          settled = true;
+          rejectReady(new Error('OpenCV 初始化中断：' + message));
+        },
+      };
+      // The vendored OpenCV 4.10 UMD build reads its initial options from cv.
+      window.Module = moduleOptions;
+      window.cv = moduleOptions;
+      window.__onOpenCvScriptLoaded = () => finish(window.cv);
+      window.__onOpenCvScriptError = () => {
+        if (settled) return;
+        settled = true;
+        rejectReady(new Error('无法加载 OpenCV。请检查网络连接后刷新页面。'));
+      };
+    })();
+  </script>
+  <script async src="./opencv.js" onload="__onOpenCvScriptLoaded()" onerror="__onOpenCvScriptError()"></script>
+  <script src="./extractstamp.js" defer onerror="window.__extractStampScriptError = true"></script>
   <style>
     body { max-width: 960px; margin: 2rem auto; padding: 0 1rem; font: 16px system-ui, sans-serif; color: #222; }
     label { display: inline-block; margin: .5rem 1rem .5rem 0; }
@@ -27,8 +69,8 @@
   <label>输出：<select id="outputMode"><option value="original" selected>保留原色</option><option value="custom">统一颜色</option></select></label>
   <label>统一颜色：<input id="outputColor" type="color" value="#0000ff"></label>
   <button id="download" type="button" disabled>下载结果</button>
-  <div id="status" role="status">正在加载本地图像处理引擎…</div>
-  <p class="hint">背景文字较多时，请保持“严格清理”；印泥很浅或残缺时再尝试“保留浅色印泥”。</p>
+  <div id="status" role="status">正在加载 OpenCV 图像处理引擎…</div>
+  <p class="hint">红色印章请将“颜色”切换为“红色”。“严格清理”会排除压在印章上的深色文字；印泥很浅或残缺时再尝试“保留浅色印泥”。</p>
   <h2>原图</h2><div id="original" class="grid"></div>
   <h2>提取结果</h2><div id="result" class="grid"></div>
   <script>
