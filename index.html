@@ -10,40 +10,37 @@
       let settled = false;
       let resolveReady;
       let rejectReady;
-      window.__openCvReady = new Promise((resolve, reject) => {
-        resolveReady = resolve;
-        rejectReady = reject;
-      });
+      window.__openCvReady = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        rejectReady(error instanceof Error ? error : new Error('OpenCV 加载失败。'));
+      };
       const finish = (candidate) => {
         if (settled) return;
-        Promise.resolve(candidate || window.cv).then((loadedCv) => {
-          if (settled || !loadedCv || typeof loadedCv.Mat !== 'function') return;
+        const loadedCv = candidate || window.cv;
+        if (!loadedCv) return;
+        if (typeof loadedCv.Mat === 'function') {
           settled = true;
           window.cv = loadedCv;
           resolveReady(loadedCv);
-        }, (error) => {
-          if (settled) return;
-          settled = true;
-          rejectReady(error instanceof Error ? error : new Error('OpenCV 加载失败。'));
-        });
+          return;
+        }
+        // OpenCV 4.10 supplies a thenable Module, not a native Promise.
+        if (typeof loadedCv.then === 'function') {
+          loadedCv.then(finish, fail);
+          return;
+        }
+        fail(new Error('OpenCV 未能正确初始化。'));
       };
       const moduleOptions = {
         onRuntimeInitialized() { finish(window.cv); },
-        onAbort(message) {
-          if (settled) return;
-          settled = true;
-          rejectReady(new Error('OpenCV 初始化中断：' + message));
-        },
+        onAbort(message) { fail(new Error('OpenCV 初始化中断：' + message)); },
       };
-      // The vendored OpenCV 4.10 UMD build reads its initial options from cv.
       window.Module = moduleOptions;
       window.cv = moduleOptions;
       window.__onOpenCvScriptLoaded = () => finish(window.cv);
-      window.__onOpenCvScriptError = () => {
-        if (settled) return;
-        settled = true;
-        rejectReady(new Error('无法加载 OpenCV。请检查网络连接后刷新页面。'));
-      };
+      window.__onOpenCvScriptError = () => fail(new Error('无法加载 OpenCV。请检查网络连接后刷新页面。'));
     })();
   </script>
   <script async src="./opencv.js" onload="__onOpenCvScriptLoaded()" onerror="__onOpenCvScriptError()"></script>
@@ -81,14 +78,8 @@
     const outputColor = document.getElementById('outputColor');
     let latestResult = null;
     let originalUrl = null;
-
-    const setStatus = (message, error = false) => {
-      status.textContent = message;
-      status.classList.toggle('error', error);
-    };
-    const updateOutputControl = () => {
-      outputColor.disabled = outputMode.value === 'original';
-    };
+    const setStatus = (message, error = false) => { status.textContent = message; status.classList.toggle('error', error); };
+    const updateOutputControl = () => { outputColor.disabled = outputMode.value === 'original'; };
     const showOriginal = (file) => {
       if (originalUrl) URL.revokeObjectURL(originalUrl);
       originalUrl = URL.createObjectURL(file);
@@ -111,11 +102,9 @@
         setStatus(error.message || '处理引擎初始化失败，请刷新后重试。', true);
       }
     }
-
     updateOutputControl();
     outputMode.addEventListener('change', updateOutputControl);
     startApp();
-
     input.addEventListener('change', async () => {
       const file = input.files[0];
       if (!file) return;
@@ -126,13 +115,7 @@
       setStatus('正在提取并清理背景…');
       try {
         const color = outputMode.value === 'original' ? 'original' : outputColor.value;
-        const images = await extractStampWithFile(
-          file,
-          color,
-          document.getElementById('color').value,
-          document.getElementById('shape').value,
-          document.getElementById('cleanup').value,
-        );
+        const images = await extractStampWithFile(file, color, document.getElementById('color').value, document.getElementById('shape').value, document.getElementById('cleanup').value);
         if (!images.length) throw new Error('未找到符合条件的印章。请先尝试“保留浅色印泥”或选择更准确的颜色。');
         latestResult = images[0];
         const result = document.getElementById('result');
