@@ -5,14 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="./logo32.png">
   <title>印章提取器</title>
-  <script>
-    window.Module = window.Module || {};
-    window.Module.onRuntimeInitialized = function () {
-      window.dispatchEvent(new Event('opencv-ready'));
-    };
-  </script>
-    <script async src="https://cdn.jsdelivr.net/npm/opencv.js@1.2.1/opencv.js"></script>
-    <script async src="./extractstamp.js" onerror="window.__extractStampScriptError = true;"></script>
+  <script defer src="./extractstamp.js" onerror="window.__extractStampScriptError = true;"></script>
   <style>
     body { max-width: 960px; margin: 2rem auto; padding: 0 1rem; font: 16px system-ui, sans-serif; color: #222; }
     label { display: inline-block; margin: .5rem 1rem .5rem 0; }
@@ -31,7 +24,7 @@
   <label>形状：<select id="shape"><option value="ellipse" selected>椭圆/自动裁剪</option><option value="none">不裁剪</option></select></label>
   <label>输出颜色：<input id="outputColor" type="color" value="#0000ff"></label>
   <button id="download" type="button" disabled>下载结果</button>
-  <div id="status" role="status">正在加载 OpenCV.js…</div>
+  <div id="status" role="status">正在初始化处理引擎…</div>
   <h2>原图</h2><div id="original" class="grid"></div>
   <h2>提取结果</h2><div id="result" class="grid"></div>
   <script>
@@ -47,7 +40,7 @@
         return;
       }
       initOpenCV()
-        .then(() => setStatus('OpenCV 已就绪，请选择图片。'))
+        .then(() => setStatus('处理引擎已就绪，请选择图片。'))
         .catch((e) => setStatus(e.message, true));
     };
 
