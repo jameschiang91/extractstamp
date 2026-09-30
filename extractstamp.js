@@ -418,3 +418,4 @@ function extractStampWithImage(img, setColor) {
 window.initOpenCV = initOpenCV;
 window.extractStampWithFile = extractStampWithFile;
 window.extractStampWithImage = extractStampWithImage;
+
