@@ -5,8 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="./logo32.png">
   <title>印章提取器</title>
+  <script>
+    window.Module = window.Module || {};
+    window.Module.onRuntimeInitialized = function () {
+      window.dispatchEvent(new Event('opencv-ready'));
+    };
+  </script>
   <script src="https://docs.opencv.org/4.x/opencv.js"></script>
-  <script src="./extractstamp.js"></script>
+  <script src="./extractstamp.js" onerror="window.__extractStampScriptError = true;"></script>
   <style>
     body { max-width: 960px; margin: 2rem auto; padding: 0 1rem; font: 16px system-ui, sans-serif; color: #222; }
     label { display: inline-block; margin: .5rem 1rem .5rem 0; }
@@ -35,7 +41,11 @@
     let latestResult = null;
     const setStatus = (message, error = false) => { status.textContent = message; status.classList.toggle('error', error); };
     const showOriginal = (file) => { const url = URL.createObjectURL(file); const image = document.createElement('img'); image.src = url; image.alt = '原图'; const container = document.getElementById('original'); container.innerHTML = ''; container.appendChild(image); };
-    initOpenCV().then(() => setStatus('OpenCV 已就绪，请选择图片。')).catch((e) => setStatus(e.message, true));
+    if (window.__extractStampScriptError || typeof initOpenCV !== 'function') {
+      setStatus('处理脚本加载失败，请刷新页面后重试。', true);
+    } else {
+      initOpenCV().then(() => setStatus('OpenCV 已就绪，请选择图片。')).catch((e) => setStatus(e.message, true));
+    }
     input.addEventListener('change', async () => {
       const file = input.files[0]; if (!file) return;
       showOriginal(file); document.getElementById('result').innerHTML = ''; download.disabled = true; latestResult = null; setStatus('处理中…');
