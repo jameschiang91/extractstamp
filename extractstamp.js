@@ -3,10 +3,11 @@
 let engineReadyPromise;
 
 const COLOR_RANGES = {
-  red: [{ min: 0, max: 22 }, { min: 338, max: 360 }],
-  blue: [{ min: 180, max: 275 }],
-  green: [{ min: 70, max: 180 }],
-  purple: [{ min: 260, max: 338 }],
+  auto: { ranges: [{ min: 160, max: 345 }], minSaturation: 0.04, maxValue: 0.86 },
+  red: { ranges: [{ min: 0, max: 22 }, { min: 338, max: 360 }], minSaturation: 0.12, maxValue: 1 },
+  blue: { ranges: [{ min: 180, max: 275 }], minSaturation: 0.06, maxValue: 1 },
+  green: { ranges: [{ min: 70, max: 180 }], minSaturation: 0.08, maxValue: 1 },
+  purple: { ranges: [{ min: 210, max: 345 }], minSaturation: 0.04, maxValue: 0.90 },
 };
 
 function initOpenCV(callback) {
@@ -46,22 +47,24 @@ function rgbToHsv(r, g, b) {
 
 function isTargetPixel(r, g, b, color) {
   const [hue, saturation, value] = rgbToHsv(r, g, b);
-  if (saturation < 0.16 || value < 0.10) return false;
-  return (COLOR_RANGES[color] || COLOR_RANGES.blue).some(({ min, max }) => hue >= min && hue <= max);
+  const config = COLOR_RANGES[color] || COLOR_RANGES.auto;
+  if (saturation < config.minSaturation || value < 0.10 || value > config.maxValue) return false;
+  return config.ranges.some(({ min, max }) => hue >= min && hue <= max);
 }
 
 function createResultData(source, width, height, bounds, targetColor, outputColor) {
   const output = new Uint8ClampedArray(bounds.width * bounds.height * 4);
-  const [red, green, blue] = hexToRgb(outputColor);
+  const preserveOriginal = !outputColor || outputColor === 'original';
+  const [red, green, blue] = preserveOriginal ? [0, 0, 0] : hexToRgb(outputColor);
   let matched = 0;
   for (let y = 0; y < bounds.height; y += 1) {
     for (let x = 0; x < bounds.width; x += 1) {
       const sourceIndex = ((bounds.top + y) * width + bounds.left + x) * 4;
       const targetIndex = (y * bounds.width + x) * 4;
       if (!isTargetPixel(source[sourceIndex], source[sourceIndex + 1], source[sourceIndex + 2], targetColor)) continue;
-      output[targetIndex] = red;
-      output[targetIndex + 1] = green;
-      output[targetIndex + 2] = blue;
+      output[targetIndex] = preserveOriginal ? source[sourceIndex] : red;
+      output[targetIndex + 1] = preserveOriginal ? source[sourceIndex + 1] : green;
+      output[targetIndex + 2] = preserveOriginal ? source[sourceIndex + 2] : blue;
       output[targetIndex + 3] = 255;
       matched += 1;
     }
@@ -69,7 +72,7 @@ function createResultData(source, width, height, bounds, targetColor, outputColo
   return { output, matched };
 }
 
-function extractStampWithImage(img, setColor = '#0000ff', color = 'blue', shape = 'ellipse') {
+function extractStampWithImage(img, setColor = 'original', color = 'auto', shape = 'ellipse') {
   const canvas = document.createElement('canvas');
   canvas.width = img.naturalWidth || img.width;
   canvas.height = img.naturalHeight || img.height;
@@ -114,7 +117,7 @@ function extractStampWithImage(img, setColor = '#0000ff', color = 'blue', shape 
   return [outputCanvas.toDataURL('image/png')];
 }
 
-function extractStampWithFile(file, setColor = '#0000ff', color = 'blue', shape = 'ellipse') {
+function extractStampWithFile(file, setColor = 'original', color = 'auto', shape = 'ellipse') {
   return new Promise((resolve, reject) => {
     if (!file) {
       reject(new Error('请选择图片文件。'));
