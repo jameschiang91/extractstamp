@@ -1,0 +1,6 @@
+OpenCV.js 4.5.0 (unmodified official distribution)
+Source: https://github.com/opencv/opencv/releases/tag/4.5.0
+Archive: opencv-4.5.0-docs.zip
+Archive SHA256: 7118390015ae5cfe709dbc2d3557b68fbb054fc167403d352292376f29ff86a9
+Extracted entry: 4.5.0/opencv.js
+OpenCV license: Apache-2.0 (see LICENSE-OpenCV.txt)

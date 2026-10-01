@@ -1,43 +1,50 @@
 # extractstamp
 
-Extract stamps from images using OpenCV.js.
+纯前端 OpenCV.js 印章提取。图片仅在浏览器中处理，不上传服务器。
 
-##
-Preview Site: https://xxss0903.github.io/extractstamp/index.html
+## 当前状态：实验归档，彩色椭圆章不可用
 
-## Features
+**用户实测结论：彩色椭圆章仍保留背景文字痕迹，效果差，未达到可用标准。**
+本次提交仅保存实验进度，不表示问题已经解决，也不建议将该模式用于正式文档。
+自动化检查只验证运行流程、颜色赋值、透明度及几何定位；这些检查通过不等于实际分离效果合格。
 
-- Extract red stamps from images
-- Support for circular stamp detection and extraction
-- Ability to set the color of the extracted stamp
+## 两种模式
 
-## Usage Instructions
+- **原版红色圆章（默认）**：保留原版九个图像处理函数和红色输出。仅修复 OpenCV 就绪判断、异常传递和加载提示。用户已验证上传修复版本可用；原算法对形状和颜色的限制仍存在。
+- **自定义颜色 / 椭圆章（实验未通过）**：支持图片取色、输入提取色、调整色相容差与去灰阈值，输出可保留照片颜色或统一为指定颜色。目前仅尝试提取最大的匹配椭圆章。
 
-1. Clone or download this repository to your local machine.
+## 本地使用
 
-2. Ensure your project includes the following files:
-   - extractStamp.js
-   - opencv.js (can be included via CDN, e.g., https://docs.opencv.org/4.x/opencv.js)
+1. 下载并完整解压仓库，不要仅下载 index.html。
+2. 将 index.html、app.js、extractstamp.js、colorstamp.js、opencv.js 保持在同一目录。
+3. 用浏览器打开 index.html，等待显示已就绪。
+4. 默认红章模式选择图片后自动处理；实验模式需先设定提取颜色，再点击“重新提取”。
+5. 点击结果下方“下载透明 PNG”保存。
 
-3. Click the "Choose File" button to select an image file containing a stamp.
+OpenCV 4.5.0 的官方运行库已随仓库提供，避免依赖文档站的脚本加载。来源和发布包校验值见 [OPENCV-SOURCE.txt](OPENCV-SOURCE.txt)，许可证见 [LICENSE-OpenCV.txt](LICENSE-OpenCV.txt)。
 
-4. The system will automatically process the image, extract the red stamp, and display the results.
+## GitHub Pages
 
-## Main Function Description
+页面：[jameschiang91.github.io/extractstamp](https://jameschiang91.github.io/extractstamp/)。
+在仓库 Settings → Pages 中选择 Deploy from a branch，分支 master、目录 / (root)。项目不需要构建步骤或后端。
 
-- `initOpenCV(callback)`: Initialize OpenCV.js
-- `extractStampWithFile(file, setColor, isCircle)`: Extract stamp from a file
-  - `file`: Image file
-  - `setColor`: Set the color of the extracted stamp (default is red "#ff0000")
-  - `isCircle`: Whether to extract only circular stamps (default is true)
+## 已知问题与边界
 
-## Example
-```js
-extractStampWithFile(file, '#ff0000', true).then(dstImgList => {
-    console.log('Red stamp extraction successful', dstImgList);
-}).catch(error => {
-    console.error('Error processing image:', error);
-});
-```
-![Original Image](./1.png)
-![Extracted Stamp](./2.png)
+- 灰紫色印章与背景文字重叠时，现有颜色阈值不能可靠分离，会出现背景字残留和笔画缺失。
+- 同色非印章内容不能仅靠颜色可靠排除；椭圆定位成功不等于内容提取干净。
+- 不能恢复马赛克或完全遮挡的笔画，不会自动补画。
+- 保留原色仅保留照片中的实际像素，不能还原拍摄前的颜色。
+- 边框过于残缺、颜色接近灰黑时，可能无法检测。
+- 原版红章模式的检测与裁剪限制仍然保留。
+- 超过 2500 万像素的图片需先裁剪；处理在浏览器主线程运行，大图可能短暂阻塞界面。
+
+## 验证记录（不可作为质量验收）
+
+- 原版红章样例：生成一张输出，处理后控件恢复。
+- 彩色椭圆实验：真实样例完成运行；原色输出像素与源图对应一致；自定义颜色和透明区域一致。
+- 蓝、绿、紫红旋转椭圆合成样例、无匹配颜色、非法颜色和取色交互检查通过。
+- **最终质量验收未通过：用户确认背景文字残留，当前方案不可用。**
+
+用户照片、处理结果、临时测试服务器和下载的完整文档包不提交到本仓库。
+
+原始项目：[xxss0903/extractstamp](https://github.com/xxss0903/extractstamp)。

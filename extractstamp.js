@@ -4,18 +4,30 @@ let cvReady = false;
 const primaryColor = "#ff0000";
 
 function initOpenCV(callback) {
-  if (typeof cv !== "undefined") {
-    cvReady = true;
-    console.log("OpenCV.js 已加载");
-    callback && callback(true);
-  } else {
-    console.log("等待 OpenCV.js 加载...");
-    document.addEventListener("opencv-ready", () => {
-      cvReady = true;
-      console.log("OpenCV.js 已加载");
-      callback && callback(true);
-    });
-  }
+  // OpenCV 4.5 exposes cv before its runtime is usable. Do not resolve
+  // with cv itself: this build has a self-returning then() method.
+  const ready = new Promise((resolve, reject) => {
+    const started = Date.now();
+    function check() {
+      if (window.openCvLoadError) {
+        reject(new Error('OpenCV 脚本加载失败，请检查网络后刷新重试。'));
+        return;
+      }
+      if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') {
+        cvReady = true;
+        resolve();
+        return;
+      }
+      if (Date.now() - started >= 30000) {
+        reject(new Error('OpenCV 初始化超时，请检查网络后刷新重试。'));
+        return;
+      }
+      setTimeout(check, 100);
+    }
+    check();
+  });
+  if (callback) ready.then(() => callback(true), () => callback(false));
+  return ready;
 }
 
 /**
@@ -215,18 +227,26 @@ function extractStampWithColorToImage(
  * @returns
  */
 function extractStampWithFile(file, setColor) {
-  return new Promise((resolve, reject) => {
+  return initOpenCV().then(() => new Promise((resolve, reject) => {
     const img = new Image();
+    let objectUrl;
     img.onload = () => {
-      const result = extractStampWithImage(img, setColor);
-      resolve(result);
+      try {
+        resolve(extractStampWithImage(img, setColor));
+      } catch (error) {
+        reject(error);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
     };
     img.onerror = (error) => {
+      URL.revokeObjectURL(objectUrl);
       console.error("图片加载失败", error);
       reject(new Error("图片加载失败"));
     };
-    img.src = URL.createObjectURL(file);
-  });
+    objectUrl = URL.createObjectURL(file);
+    img.src = objectUrl;
+  }));
 }
 
 /**
@@ -418,4 +438,3 @@ function extractStampWithImage(img, setColor) {
 window.initOpenCV = initOpenCV;
 window.extractStampWithFile = extractStampWithFile;
 window.extractStampWithImage = extractStampWithImage;
-
